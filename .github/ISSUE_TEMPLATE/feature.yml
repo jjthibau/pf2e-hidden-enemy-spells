@@ -1,0 +1,20 @@
+name: Feature or spell support
+description: Suggest an improvement or a spell sequencing profile.
+title: "[Request]: "
+body:
+  - type: textarea
+    id: request
+    attributes:
+      label: What should change?
+      description: Describe the table workflow and why the existing controls do not cover it.
+    validations:
+      required: true
+  - type: textarea
+    id: spell
+    attributes:
+      label: Spell details, if applicable
+      description: Name/variant, PF2e version, rule reference link, who chooses the save, initial saves, and conditional follow-ups. Do not paste full copyrighted spell descriptions.
+  - type: textarea
+    id: alternative
+    attributes:
+      label: Current workaround or proposed behavior

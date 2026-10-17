@@ -1,0 +1,6 @@
+.pf2e-hidden-spell .hidden-spell-header { display:flex; align-items:center; gap:.5em; }
+.pf2e-hidden-spell .save-prompt { margin:.35em 0; }
+.pf2e-hidden-spell .gm-controls { border-top:1px solid var(--color-border-light-primary); margin-top:.5em; padding-top:.5em; }
+.hidden-spell-gm-controls { display: grid; gap: .25em; border-bottom: 1px solid var(--color-border-light-primary); padding-bottom: .5em; margin-bottom: .5em; }
+.hidden-spell-gm-controls p { margin: .25em 0; }
+.hidden-spell-gm-controls button { white-space: normal; width: 100%; }

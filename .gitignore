@@ -1,0 +1,24 @@
+# Publish only the portable module, documentation and build/test tooling.
+# Local campaign evidence, server operations, licensed data and agent notes stay local.
+/*
+!/.gitignore
+!/.gitattributes
+!/.github/
+!/README.md
+!/LICENSE
+!/CHANGELOG.md
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/module.json
+!/package.json
+!/scripts/
+!/styles/
+!/docs/
+!/tools/
+!/tests/
+/tests/*
+!/tests/plans.test.mjs
+**/__pycache__/
+**/*.pyc
+**/.DS_Store
+**/Thumbs.db
