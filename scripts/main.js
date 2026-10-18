@@ -248,6 +248,11 @@ Hooks.once('init', () => {
     hint: 'Default off. Reveal when a conscious party character on this scene has the spell prepared or in their repertoire and can see an ordinary casting. Subtle, hidden and uncertain castings remain GM-controlled. Offline characters count.',
     scope: 'world', config: true, type: Boolean, default: false,
   });
+  game.settings.register(ID, 'revealOnRecognition', {
+    name: 'Reveal spell after successful recognition',
+    hint: 'Default off. A successful or critically successful recognition check reveals the spell card to its existing audience and names the recognizing character. Failed checks leave it hidden.',
+    scope: 'world', config: true, type: Boolean, default: false,
+  });
 });
 
 Hooks.once('ready', () => {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Recognition buttons show only the required skill, for example Recognize Spell (Arcana).
+- Allow repeated recognition attempts by the same user/character for a casting. Each request is still processed once by the GM.
+- Optional Reveal spell after successful recognition setting, default off. Success/critical success reveals the existing card with PC attribution; failures keep it hidden.
+
 ## 0.2.1
 
 - Recognition buttons name the required skill and casting tradition, account for supported skill substitutions, and refresh when the selected character changes.

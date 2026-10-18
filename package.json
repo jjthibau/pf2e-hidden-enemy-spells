@@ -1,6 +1,6 @@
 {
   "name": "pf2e-hidden-enemy-spells",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "Anonymous PF2e enemy spell cards with native saving throws and GM reveal controls.",

@@ -7,7 +7,6 @@ const featsOf = actor => [...(actor.itemTypes.feat ?? []), ...(actor.itemTypes.a
 const castFlag = m => m?.getFlag(ID, 'cast');
 let revealCast;
 const skillLabel = skill => game.i18n.localize(CONFIG.PF2E.skills[skill]?.label ?? skill);
-const traditionLabel = tradition => game.i18n.localize(CONFIG.PF2E.magicTraditions[tradition] ?? tradition);
 function selectedRecognizer() {
   const selected = canvas.tokens?.controlled.filter(t => t.actor?.isOfType('character') && t.actor.isOwner) ?? [];
   return selected.length === 1 ? selected[0].actor : selected.length ? null : game.user.character;
@@ -18,7 +17,7 @@ function updateRecognitionButton(message, button) {
   const actor = selectedRecognizer();
   const plan = recognitionPlan({tradition, rank: 1, skills: actor?.skills ?? {}, feats: actor ? featsOf(actor) : [],
     traits: message.flags.pf2e?.origin?.traits ?? []});
-  button.textContent = plan ? `Recognize Spell (${skillLabel(plan.skill)} / ${traditionLabel(tradition)})` : 'Recognize Spell';
+  button.textContent = plan ? `Recognize Spell (${skillLabel(plan.skill)})` : 'Recognize Spell';
   const untrained = actor && plan?.untrained;
   button.title = untrained ? `${actor.name} is untrained in ${skillLabel(plan.skill)}. This attempt automatically fails unless the spell is prepared or in their repertoire.` : '';
 }
@@ -152,7 +151,10 @@ async function resolveRequest(request) {
     const degree = plan.automatic ? Math.max(2, roll.degreeOfSuccess) : roll.degreeOfSuccess;
     const outcome = ['critical failure — choose an incorrect identification', 'failure', 'success',
       plan.hasFeat ? 'critical success — +1 circumstance to AC or saves against this spell' : 'critical success'][degree];
-    await resultMessage(target, actor, `${esc(outcome)} identifying <strong>${esc(spell.name)}</strong>.${plan.automatic ? ' Common spell automatically recognized through skill proficiency; rolled for critical success.' : ''} Use the GM Reveal control to share the spell.`, {privateResult: true});
+    const autoReveal = degree >= 2 && game.settings.get(ID, 'revealOnRecognition');
+    if (autoReveal) await revealCast(source, {recognition: {actor: actor.id, name: actor.name,
+      reason: `${degree === 3 ? 'critical success' : 'success'} using ${skillLabel(plan.skill)} to recognize this spell`}});
+    await resultMessage(target, actor, `${esc(outcome)} identifying <strong>${esc(spell.name)}</strong>.${plan.automatic ? ' Common spell automatically recognized through skill proficiency; rolled for critical success.' : ''} ${autoReveal ? 'The spell card was automatically revealed.' : 'Use the GM Reveal control to share the spell.'}`, {privateResult: true});
   } catch (error) {
     console.error(ID, error); ui.notifications.error(error.message);
     await ChatMessage.create({whisper: request.whisper, content: `<p>Spell recognition could not finish: ${esc(error.message)} Ask the GM to resolve it manually.</p>`});
@@ -163,8 +165,6 @@ async function resolveRequest(request) {
 export async function requestRecognition(message, actor) {
   if (!actor?.isOfType('character') || !actor.isOwner) return ui.notifications.warn('Select one character you own, or assign your character in User Configuration.');
   if (!game.users.some(u => u.active && u.isGM)) return ui.notifications.warn('A GM must be connected to resolve spell recognition.');
-  const already = game.messages.some(m => m.author?.id === game.user.id && m.getFlag(ID, 'recognitionRequest')?.message === message.id && m.getFlag(ID, 'recognitionRequest')?.actor === actor.id);
-  if (already) return ui.notifications.info('Recognition already requested for this character and casting.');
   await ChatMessage.create({speaker: ChatMessage.getSpeaker({actor}), content: `<p>${esc(actor.name)} attempts to recognize the spell.</p>`,
     whisper: [...new Set([game.user.id, ...game.users.filter(u => u.isGM).map(u => u.id)])],
     flags: {[ID]: {recognitionRequest: {actor: actor.id, message: message.id, mode: game.settings.get('core', 'messageMode')}}}});

@@ -21,8 +21,9 @@ A free Foundry VTT module for Pathfinder Second Edition. The GM casts normally f
 - Keeps conditional follow-up saves with the GM until they are actually needed.
 - Reveals the full native spell on the same chat card.
 - Recognize Spell button checks the selected character's prepared spells/repertoire before rolling, then uses native skills and the GM's visibility settings.
-- The button names the skill and casting tradition. Unknown spells automatically fail recognition if the character is untrained in the resolved skill; supported feat substitutions still apply.
+- The button names the required skill, for example **Recognize Spell (Arcana)**. Unknown spells automatically fail recognition if the character is untrained in the resolved skill; supported feat substitutions still apply. Repeat attempts are allowed; the table handles action costs and retry rulings.
 - Optional automatic party recognition on casting, default off, with individual token sight and consciousness checks.
+- Optional **Reveal spell after successful recognition**, default off, reveals the card on a successful check and names the recognizing PC.
 - Preserves native spell-slot consumption. Cancelling a caster-choice dialog does not spend a slot.
 - Leaves player-character spells, party-allied NPC spells and explicitly private casts in their normal visibility scope.
 
@@ -55,6 +56,8 @@ The manifest URL works independently of Foundry's package directory. Directory l
 ### Recognizing a spell
 
 Select one character you own and click **Recognize Spell** on an unidentified card. With no selected character token, the button uses your assigned character. A connected GM resolves the request. Action/reaction costs are handled by the table.
+
+Repeat attempts are allowed on the same card. **Reveal spell after successful recognition** is a separate world setting, default **off**. Enable it to reveal the card after a success or critical success and show which PC recognized it. Failed attempts leave it unidentified. With this setting off, the GM chooses when to reveal rolled recognitions.
 
 If the character has that spell prepared today (including an expended preparation) or in their spontaneous repertoire, the card reveals immediately without a roll. A note on the revealed card names the recognizing PC and explains whether the spell was prepared or in their repertoire; the note persists after reload. This does not require matching traditions, and works even with automatic party recognition disabled. A spell merely stored in a spellbook, an innate spell, or a focus spell does not by itself qualify as prepared/in repertoire.
 
