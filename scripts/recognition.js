@@ -37,7 +37,7 @@ export function recognitionPlan({tradition, rank, rarity = 'common', skills, fea
   const automatic = hasFeat && rarity === 'common' && proficiency > 0 && rank <= [0, 2, 4, 6, 10][proficiency];
   const dc = Number.isInteger(dcOverride) && dcOverride > 0 ? dcOverride :
     DC[Math.min(10, Math.max(1, rank))] + ({common: 0, uncommon: 2, rare: 5, unique: 10}[rarity] ?? 0) + (bizarre ? 5 : 0);
-  return {skill, dc, automatic, hasFeat, proficiency, action: hasFeat ? 'recognize-spell' : 'recall-knowledge'};
+  return {skill, dc, automatic, hasFeat, proficiency, untrained: proficiency < 1, action: hasFeat ? 'recognize-spell' : 'recall-knowledge'};
 }
 
 export function canObserveCasting({party, sameScene, observerHidden, dead, unconscious, blinded, casterHidden, subtle, visible}) {

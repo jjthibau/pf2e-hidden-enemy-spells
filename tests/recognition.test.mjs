@@ -63,6 +63,18 @@ test('no feat uses Recall Knowledge; untrained recognition cannot auto succeed',
   assert.equal(recognitionPlan({tradition:'arcane',rank:1,skills:{}}).action,'recall-knowledge');
   assert.equal(recognitionPlan({tradition:'arcane',rank:1,skills:{},feats:['recognize-spell']}).automatic,false);
 });
+test('training gate applies with and without the feat and respects substitutions', () => {
+  for (const feats of [[], ['recognize-spell']]) {
+    for (const tradition of ['arcane', 'divine', 'occult', 'primal']) {
+      const base = {tradition, rank:3, skills:{}, feats};
+      assert.equal(recognitionPlan(base).untrained, true);
+      const skill = recognitionPlan(base).skill;
+      assert.equal(recognitionPlan({...base, skills:{[skill]:{rank:1}}}).untrained, false);
+    }
+  }
+  assert.equal(recognitionPlan({tradition:'primal',rank:3,skills:{arcana:{rank:4}},feats:['unified-theory']}).untrained,false);
+  assert.equal(recognitionPlan({tradition:'arcane',rank:3,skills:{occultism:{rank:2,mod:10}},feats:['oddity-identification'],traits:['mental']}).untrained,false);
+});
 test('presence excludes ambiguity and impairments but not deafness, paralysis, stun or offline owner', () => {
   const yes={party:true,sameScene:true,visible:true};
   assert(canObserveCasting({...yes,deafened:true,paralyzed:true,stunned:true,ownerOnline:false}));

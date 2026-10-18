@@ -6,6 +6,29 @@ const busy = new Set();
 const featsOf = actor => [...(actor.itemTypes.feat ?? []), ...(actor.itemTypes.action ?? [])].map(f => f.slug);
 const castFlag = m => m?.getFlag(ID, 'cast');
 let revealCast;
+const skillLabel = skill => game.i18n.localize(CONFIG.PF2E.skills[skill]?.label ?? skill);
+const traditionLabel = tradition => game.i18n.localize(CONFIG.PF2E.magicTraditions[tradition] ?? tradition);
+function selectedRecognizer() {
+  const selected = canvas.tokens?.controlled.filter(t => t.actor?.isOfType('character') && t.actor.isOwner) ?? [];
+  return selected.length === 1 ? selected[0].actor : selected.length ? null : game.user.character;
+}
+
+function updateRecognitionButton(message, button) {
+  const tradition = message.flags.pf2e?.casting?.tradition;
+  const actor = selectedRecognizer();
+  const plan = recognitionPlan({tradition, rank: 1, skills: actor?.skills ?? {}, feats: actor ? featsOf(actor) : [],
+    traits: message.flags.pf2e?.origin?.traits ?? []});
+  button.textContent = plan ? `Recognize Spell (${skillLabel(plan.skill)} / ${traditionLabel(tradition)})` : 'Recognize Spell';
+  const untrained = actor && plan?.untrained;
+  button.title = untrained ? `${actor.name} is untrained in ${skillLabel(plan.skill)}. This attempt automatically fails unless the spell is prepared or in their repertoire.` : '';
+}
+
+function refreshRecognitionButtons() {
+  for (const button of document.querySelectorAll('[data-recognize-spell]')) {
+    const message = game.messages.get(button.closest('[data-message-id]')?.dataset.messageId);
+    if (message) updateRecognitionButton(message, button);
+  }
+}
 
 export async function manageRecognitionDC(message) {
   if (!game.user.isGM || castFlag(message)?.role !== 'gm') return;
@@ -105,13 +128,16 @@ async function resolveRequest(request) {
       rank: spell.rank, rarity: spell.system.traits.rarity, skills: actor.skills, feats: featsOf(actor), traits: spell.system.traits.value,
       bizarre: featsOf(spell.actor).includes('bizarre-magic'), dcOverride: castFlag(source).recognitionDC});
     if (!plan) throw Error('This casting has no known tradition. The GM can identify it manually.');
+    if (plan.untrained) {
+      await resultMessage(target, actor, `Spell recognition automatically fails: untrained in ${esc(skillLabel(plan.skill))}. No check was rolled.`,
+        {privateResult: !game.pf2e.settings.metagame.secretChecks, mode: data.mode, recipient: author.id});
+      return;
+    }
     const options = [`action:${plan.action}`, ...spell.system.traits.value.map(t => `item:trait:${t}`), 'item:magical', 'secret'];
     if (plan.hasFeat && spell.spellcasting?.tradition === 'divine') options.push('recognize-spell');
     const adjustments = {};
-    // Success floor and untrained ceiling are native degree adjustments, so the
-    // native result card agrees with the outcome used by this module.
+    // Native degree adjustments keep the result card consistent with the floor.
     if (plan.automatic) Object.assign(adjustments, {criticalFailure: 'to-success', failure: 'to-success'});
-    if (plan.hasFeat && !plan.proficiency) Object.assign(adjustments, {success: 'to-failure', criticalSuccess: 'to-failure'});
     const ephemeralEffects = Object.keys(adjustments).length ? [{_id: foundry.utils.randomID(), name: 'Recognition proficiency', type: 'effect',
       system: {rules: [{key: 'AdjustDegreeOfSuccess', selector: plan.skill, adjustment: adjustments}]}}] : [];
     const roller = actor.getContextualClone(options, ephemeralEffects);
@@ -123,7 +149,7 @@ async function resolveRequest(request) {
         if (data.mode === 'self' && game.pf2e.settings.metagame.secretChecks && message) await message.update({whisper: [author.id]});
       }});
     if (!roll) throw Error('Recognition roll was cancelled.');
-    const degree = plan.automatic ? Math.max(2, roll.degreeOfSuccess) : plan.hasFeat && !plan.proficiency ? Math.min(1, roll.degreeOfSuccess) : roll.degreeOfSuccess;
+    const degree = plan.automatic ? Math.max(2, roll.degreeOfSuccess) : roll.degreeOfSuccess;
     const outcome = ['critical failure — choose an incorrect identification', 'failure', 'success',
       plan.hasFeat ? 'critical success — +1 circumstance to AC or saves against this spell' : 'critical success'][degree];
     await resultMessage(target, actor, `${esc(outcome)} identifying <strong>${esc(spell.name)}</strong>.${plan.automatic ? ' Common spell automatically recognized through skill proficiency; rolled for critical success.' : ''} Use the GM Reveal control to share the spell.`, {privateResult: true});
@@ -150,7 +176,7 @@ export function renderRecognition(message, element) {
   const container = element.querySelector('.card-buttons');
   if (!container || container.querySelector('[data-recognize-spell]')) return;
   const button = document.createElement('button');
-  button.type = 'button'; button.dataset.recognizeSpell = ''; button.textContent = 'Recognize Spell';
+  button.type = 'button'; button.dataset.recognizeSpell = ''; updateRecognitionButton(message, button);
   button.addEventListener('click', async event => {
     event.preventDefault(); event.stopPropagation(); button.disabled = true;
     const selected = canvas.tokens?.controlled.filter(t => t.actor?.isOfType('character') && t.actor.isOwner) ?? [];
@@ -164,6 +190,12 @@ export function renderRecognition(message, element) {
 
 export function setupRecognition(reveal) {
   revealCast = reveal;
+  Hooks.on('controlToken', refreshRecognitionButtons);
+  Hooks.on('updateActor', refreshRecognitionButtons);
+  Hooks.on('updateItem', refreshRecognitionButtons);
+  Hooks.on('createItem', refreshRecognitionButtons);
+  Hooks.on('deleteItem', refreshRecognitionButtons);
+  Hooks.on('updateUser', refreshRecognitionButtons);
   Hooks.on('createChatMessage', message => {
     if (!game.user.isGM || game.users.activeGM?.id !== game.user.id) return;
     void resolveRequest(message);

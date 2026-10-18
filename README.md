@@ -21,6 +21,7 @@ A free Foundry VTT module for Pathfinder Second Edition. The GM casts normally f
 - Keeps conditional follow-up saves with the GM until they are actually needed.
 - Reveals the full native spell on the same chat card.
 - Recognize Spell button checks the selected character's prepared spells/repertoire before rolling, then uses native skills and the GM's visibility settings.
+- The button names the skill and casting tradition. Unknown spells automatically fail recognition if the character is untrained in the resolved skill; supported feat substitutions still apply.
 - Optional automatic party recognition on casting, default off, with individual token sight and consciousness checks.
 - Preserves native spell-slot consumption. Cancelling a caster-choice dialog does not spend a slot.
 - Leaves player-character spells, party-allied NPC spells and explicitly private casts in their normal visibility scope.
@@ -59,7 +60,7 @@ If the character has that spell prepared today (including an expended preparatio
 
 Otherwise, the button uses the skill for the actual casting tradition: Arcana, Religion, Occultism or Nature. Unified Theory can substitute Arcana. The DC uses the cast rank's standard spell DC plus rarity (+2 uncommon, +5 rare, +10 unique) and the caster's Bizarre Magic adjustment (+5); this is separate from the caster's save DC. The private GM card has a **Recognition DC override** control; leave it blank to restore automatic calculation. Characters without Recognize Spell use Recall Knowledge. Native secret-check, DC, result and breakdown visibility settings apply. A GM receives the identification outcome and retains the Reveal control for rolled checks, including choosing misinformation on critical failure. Critical-success AC/save bonuses remain table-managed.
 
-Recognize Spell's common-spell proficiency thresholds and untrained failure ceiling are handled in the native roll. Oddity Identification can select Occultism for qualifying Recall Knowledge checks, with its native bonus; it is not treated as permission to substitute Occultism for the Recognize Spell reaction. Other feat/homebrew exceptions remain GM-adjudicated.
+Recognize Spell's common-spell proficiency thresholds are handled in the native roll. Unknown-spell attempts with an untrained resolved skill automatically fail without rolling; prepared/repertoire matches are checked first. Oddity Identification can select Occultism for qualifying Recall Knowledge checks, with its native bonus; it is not treated as permission to substitute Occultism for the Recognize Spell reaction. Other feat/homebrew exceptions remain GM-adjudicated.
 
 **Automatically reveal spells recognized by the party** is a world setting, default **off**. When enabled, casting checks party characters on the caster's currently rendered scene, regardless of whether their players are online. With no configured party members, party-allied player-owned characters are considered. A matching prepared/repertoire spell and confirmed individual sight are required. Walls, illumination and native sight range are checked without controlling tokens or using shared/GM vision. Unconscious, dead, blinded or GM-hidden observers, hidden/invisible casters and subtle spells do not trigger automatic reveal. Deafness and paralysis alone do not prevent visual recognition. No arbitrary distance limit is added.
 

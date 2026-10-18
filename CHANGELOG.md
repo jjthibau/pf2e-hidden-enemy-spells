@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Recognition buttons name the required skill and casting tradition, account for supported skill substitutions, and refresh when the selected character changes.
+- Unknown-spell recognition automatically fails without rolling when the resolved skill is untrained, with or without the Recognize Spell feat. The explanation follows the GM's secret-check and message visibility settings.
+- Prepared/repertoire recognition still succeeds without a roll, including for untrained characters.
+
 ## 0.2.0
 
 - Recognize Spell button with native skill rolls, tradition-based skill/DC selection, Unified Theory, Oddity Identification for Recall Knowledge, rarity and Bizarre Magic adjustments.
