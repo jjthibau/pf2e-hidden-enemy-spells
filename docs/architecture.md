@@ -1,6 +1,6 @@
 # Architecture and maintenance
 
-The module extends native spell casting and chat; it does not edit actors, owned spell documents, spell slots, conditions or HP directly. `scripts/main.js` is the Foundry integration. `scripts/plans.js` is a pure save-sequencing planner.
+The module extends native spell casting and chat; it does not edit actors, owned spell documents, spell slots, conditions or HP directly. `scripts/main.js` is the casting integration. `scripts/plans.js` and `scripts/recognition.js` contain portable policy; `scripts/recognition-foundry.js` integrates recognition with native documents, checks and perception.
 
 ## One cast, two views
 
@@ -50,5 +50,13 @@ Attacks, damage, counteract checks and templates invoked from the concealed GM c
 The integration wraps the system document-class methods present at `ready`, preserving the existing method chain. It does not require libWrapper. Modules that later replace those methods or create their own cards may still conflict.
 
 There is no external service, analytics, account integration, runtime AI call, or additional socket protocol. The standard Foundry message/document model still governs visibility and trust.
+
+## Recognition
+
+Player requests are ordinary chat documents whispered to the author and GMs, containing only the public card ID, character ID and chosen native message mode. The active GM validates the actual document author, character ownership and original card audience before resolving the private spell. The request is marked handled before rolling. No original spell identifier is sent in request flags. A character may request recognition once per casting; action costs and awareness on manual requests are table-managed.
+
+Prepared/repertoire matches reveal the original card with a persistent attribution note naming the recognizing PC and explaining the preparation/repertoire match. The note and recognition metadata are stored on the revealed public message; manual GM reveals add no attribution. Other requests use a native skill check on a contextual actor clone; ephemeral degree adjustments implement proficiency success floors and the untrained ceiling without modifying the actor. Native secret-check visibility applies. Results containing the original spell identity stay GM-only for rolled checks; the GM chooses when to reveal publicly.
+
+Automatic reveal is opt-in and uses only party characters with matching preparations/repertoire on the rendered caster scene. Individual native basic-sight and light-perception detection uses a temporary unregistered vision source, with cleanup and fail-closed handling. It never swaps users, controls tokens, registers a vision source or changes fog. This requires Foundry14/PF2e internals and native regression coverage. Unknown awareness and nonvisual senses remain GM decisions.
 
 Before releasing a runtime change, review [testing.md](testing.md). Understanding this flow, the failure modes of nested flag updates, and the limitations of anonymous copies is part of maintaining the module.

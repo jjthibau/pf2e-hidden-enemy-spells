@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- Recognize Spell button with native skill rolls, tradition-based skill/DC selection, Unified Theory, Oddity Identification for Recall Knowledge, rarity and Bizarre Magic adjustments.
+- Prepared spells (including expended preparations) and repertoire spells recognize without a roll and explain why, regardless of the automatic-reveal setting.
+- Automatically revealed cards name the recognizing PC and retain the prepared/repertoire explanation on the card after reload.
+- Optional automatic party recognition at casting, default off. Requires a conscious party character on the caster's scene with the spell prepared/in repertoire and confirmed individual sight. Deafness does not prevent sight; blindness, unconsciousness, hidden/invisible casters and subtle spells prevent automatic reveal.
+- Native PF2e secret-check, DC and result visibility settings apply. Action/reaction costs remain table-managed; GM retains reveal control for rolled checks.
+- Recognize Spell proficiency success floors and untrained failure ceilings; no actor documents or combat resources are modified.
+
+Verified on Foundry VTT 14.369 / PF2e 8.6.0: 32 portable tests, 102 native integration checks plus 44 focused checks after attribution, and GM/player playtesting.
+
 ## 0.1.0
 
 Initial public release. Runtime behavior matches the version tested at the table; public packaging adds installation/update URLs, documentation, tests and release tooling.

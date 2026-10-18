@@ -1,6 +1,6 @@
 {
   "name": "pf2e-hidden-enemy-spells",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Anonymous PF2e enemy spell cards with native saving throws and GM reveal controls.",
@@ -8,7 +8,7 @@
   "repository": {"type": "git", "url": "https://github.com/jjthibau/pf2e-hidden-enemy-spells.git"},
   "engines": {"node": ">=22"},
   "scripts": {
-    "test": "node --test tests/plans.test.mjs",
+    "test": "node --test tests/plans.test.mjs tests/recognition.test.mjs",
     "test:catalog": "node tests/test-plans.mjs",
     "test:native": "node tests/run-native.mjs",
     "build": "python tools/build_release.py",

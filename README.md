@@ -20,6 +20,8 @@ A free Foundry VTT module for Pathfinder Second Edition. The GM casts normally f
 - Prompts the GM for caster-selected alternatives and shows alternatives when the target chooses.
 - Keeps conditional follow-up saves with the GM until they are actually needed.
 - Reveals the full native spell on the same chat card.
+- Recognize Spell button checks the selected character's prepared spells/repertoire before rolling, then uses native skills and the GM's visibility settings.
+- Optional automatic party recognition on casting, default off, with individual token sight and consciousness checks.
 - Preserves native spell-slot consumption. Cancelling a caster-choice dialog does not spend a slot.
 - Leaves player-character spells, party-allied NPC spells and explicitly private casts in their normal visibility scope.
 
@@ -48,6 +50,20 @@ The manifest URL works independently of Foundry's package directory. Directory l
 3. **GM:** keep the private full card for normal spell controls. Its attack, damage and template buttons use anonymous labels while the spell is hidden.
 4. **GM:** use a labeled follow-up button only after an outcome or timing condition calls for that save.
 5. **GM:** click **Reveal spell to players** when the spell is recognized.
+
+### Recognizing a spell
+
+Select one character you own and click **Recognize Spell** on an unidentified card. With no selected character token, the button uses your assigned character. A connected GM resolves the request. Action/reaction costs are handled by the table.
+
+If the character has that spell prepared today (including an expended preparation) or in their spontaneous repertoire, the card reveals immediately without a roll. A note on the revealed card names the recognizing PC and explains whether the spell was prepared or in their repertoire; the note persists after reload. This does not require matching traditions, and works even with automatic party recognition disabled. A spell merely stored in a spellbook, an innate spell, or a focus spell does not by itself qualify as prepared/in repertoire.
+
+Otherwise, the button uses the skill for the actual casting tradition: Arcana, Religion, Occultism or Nature. Unified Theory can substitute Arcana. The DC uses the cast rank's standard spell DC plus rarity (+2 uncommon, +5 rare, +10 unique) and the caster's Bizarre Magic adjustment (+5); this is separate from the caster's save DC. The private GM card has a **Recognition DC override** control; leave it blank to restore automatic calculation. Characters without Recognize Spell use Recall Knowledge. Native secret-check, DC, result and breakdown visibility settings apply. A GM receives the identification outcome and retains the Reveal control for rolled checks, including choosing misinformation on critical failure. Critical-success AC/save bonuses remain table-managed.
+
+Recognize Spell's common-spell proficiency thresholds and untrained failure ceiling are handled in the native roll. Oddity Identification can select Occultism for qualifying Recall Knowledge checks, with its native bonus; it is not treated as permission to substitute Occultism for the Recognize Spell reaction. Other feat/homebrew exceptions remain GM-adjudicated.
+
+**Automatically reveal spells recognized by the party** is a world setting, default **off**. When enabled, casting checks party characters on the caster's currently rendered scene, regardless of whether their players are online. With no configured party members, party-allied player-owned characters are considered. A matching prepared/repertoire spell and confirmed individual sight are required. Walls, illumination and native sight range are checked without controlling tokens or using shared/GM vision. Unconscious, dead, blinded or GM-hidden observers, hidden/invisible casters and subtle spells do not trigger automatic reveal. Deafness and paralysis alone do not prevent visual recognition. No arbitrary distance limit is added.
+
+Missing caster tokens, an unrendered scene, unsupported sight machinery, hearing-only awareness, special senses and concealed casting that is not represented in the spell's traits require GM adjudication. Automatic recognition leaves these uncertain cases unidentified. Manual button clicks leave awareness to the table.
 
 **Manage saving throws** lets the GM correct the current cast's initial/later saves, explicit DCs, and choice rules. **Post another save…** handles repeats and unusual instructions, with optional incapacitation.
 

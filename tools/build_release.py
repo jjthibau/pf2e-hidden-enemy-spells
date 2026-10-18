@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-FILES = ('module.json', 'scripts/main.js', 'scripts/plans.js', 'styles/cards.css', 'README.md', 'LICENSE', 'CHANGELOG.md')
+FILES = ('module.json', 'scripts/main.js', 'scripts/plans.js', 'scripts/recognition.js', 'scripts/recognition-foundry.js', 'styles/cards.css', 'README.md', 'LICENSE', 'CHANGELOG.md')
 
 
 def build(tag=None):

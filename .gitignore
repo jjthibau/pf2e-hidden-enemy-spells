@@ -18,6 +18,7 @@
 !/tests/
 /tests/*
 !/tests/plans.test.mjs
+!/tests/recognition.test.mjs
 **/__pycache__/
 **/*.pyc
 **/.DS_Store

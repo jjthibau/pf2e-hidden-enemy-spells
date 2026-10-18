@@ -4,3 +4,4 @@
 .hidden-spell-gm-controls { display: grid; gap: .25em; border-bottom: 1px solid var(--color-border-light-primary); padding-bottom: .5em; margin-bottom: .5em; }
 .hidden-spell-gm-controls p { margin: .25em 0; }
 .hidden-spell-gm-controls button { white-space: normal; width: 100%; }
+.hidden-spell-recognition { border-left: 3px solid var(--color-border-light-primary); padding: .4em .6em; margin-bottom: .5em; }

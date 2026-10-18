@@ -1,4 +1,5 @@
 import {planFor, selectChoice, SAVES} from './plans.js';
+import {autoRecognize, setupRecognition, renderRecognition, requestRecognition, automaticObserver, seesCaster, manageRecognitionDC} from './recognition-foundry.js';
 
 const ID = 'pf2e-hidden-enemy-spells';
 const TITLE = 'Unidentified Spell';
@@ -128,6 +129,8 @@ async function hideCast(spell, original, event, options) {
   const privateCard = await ChatMessage.create(source, {renderSheet: false});
   try { await ChatMessage.create(publicData, {renderSheet: false}); }
   catch (error) {ui.notifications.error('The spell remains GM-only: the anonymous card could not be posted.'); throw error;}
+  try {await autoRecognize(privateCard);}
+  catch (error) {console.error(ID, error); ui.notifications.warn('Automatic recognition could not be confirmed; use the recognition or GM Reveal button.');}
   return privateCard;
 }
 
@@ -136,12 +139,14 @@ function partner(message) {
   return game.messages.find(m => flag(m)?.link === cast?.link && flag(m)?.role === 'public' && !flag(m)?.followup);
 }
 
-async function reveal(message) {
+async function reveal(message, {recognition} = {}) {
   if (!game.user.isGM || flag(message)?.role !== 'gm') return;
   const target = partner(message);
   if (!target) return ui.notifications.warn('The anonymous spell card has been deleted.');
   if (flag(target).revealed) return;
-  const update = {content: message.content, 'flags.pf2e': clone(message.flags.pf2e), [`flags.${ID}.cast.revealed`]: true};
+  const attribution = recognition ? `<aside class="hidden-spell-recognition" role="note"><strong>Automatically recognized by ${esc(recognition.name)}</strong><br>${esc(recognition.reason)}.</aside>` : '';
+  const update = {content: attribution + message.content, 'flags.pf2e': clone(message.flags.pf2e), [`flags.${ID}.cast.revealed`]: true};
+  if (recognition) update[`flags.${ID}.cast.recognition`] = clone(recognition);
   if (!message.flags.pf2e.casting?.embeddedSpell) update['flags.pf2e.casting.-=embeddedSpell'] = null;
   await target.update(update);
   message.render(true);
@@ -187,6 +192,7 @@ async function manage(message) {
 }
 
 function renderControls(message, element) {
+  renderRecognition(message, element);
   const cast = flag(message);
   if (cast?.role === 'public' && !cast.revealed) {
     for (const button of element.querySelectorAll('button[data-action="spell-save"]')) {
@@ -203,6 +209,7 @@ function renderControls(message, element) {
   controls.innerHTML = `<p><strong>Hidden spell — GM controls</strong></p>
     <button type="button" data-hidden-action="reveal" ${revealed ? 'disabled' : ''}>${revealed ? 'Spell revealed' : 'Reveal spell to players'}</button>
     <button type="button" data-hidden-action="manage">Manage saving throws</button>
+    <button type="button" data-hidden-action="recognition-dc">Recognition DC override</button>
     ${(cast.plan?.followups ?? []).map((save, i) => `<p>${esc(save.condition)}<button type="button" data-hidden-action="followup" data-index="${i}">Post ${esc(saveLabel(save.type))} follow-up</button></p>`).join('')}
     <button type="button" data-hidden-action="followup" data-index="-1">Post another save…</button>`;
   controls.addEventListener('click', async event => {
@@ -212,6 +219,7 @@ function renderControls(message, element) {
     try {
       if (button.dataset.hiddenAction === 'reveal') await reveal(message);
       if (button.dataset.hiddenAction === 'manage') await manage(message);
+      if (button.dataset.hiddenAction === 'recognition-dc') await manageRecognitionDC(message);
       if (button.dataset.hiddenAction === 'followup') await postFollowup(message, Number(button.dataset.index));
     } catch (error) {console.error(ID, error); ui.notifications.error(error.message);}
     finally {acting.delete(message.id); button.disabled = button.dataset.hiddenAction === 'reveal' && !!flag(partner(message))?.revealed;}
@@ -235,9 +243,15 @@ Hooks.once('init', () => {
     name: 'Hide enemy spell cards', hint: 'Unowned NPCs outside the party post anonymous spell cards. The GM can reveal each cast.',
     scope: 'world', config: true, type: Boolean, default: true,
   });
+  game.settings.register(ID, 'autoRecognize', {
+    name: 'Automatically reveal spells recognized by the party',
+    hint: 'Default off. Reveal when a conscious party character on this scene has the spell prepared or in their repertoire and can see an ordinary casting. Subtle, hidden and uncertain castings remain GM-controlled. Offline characters count.',
+    scope: 'world', config: true, type: Boolean, default: false,
+  });
 });
 
 Hooks.once('ready', () => {
+  setupRecognition(reveal);
   const Spell = CONFIG.PF2E.Item.documentClasses.spell;
   const Entry = CONFIG.PF2E.Item.documentClasses.spellcastingEntry;
   const originalMessage = Spell.prototype.toMessage;
@@ -272,7 +286,7 @@ Hooks.once('ready', () => {
     const hidden = game.user.isGM && flag(message)?.role === 'gm' && !flag(partner(message))?.revealed;
     return originalTemplate.call(hidden ? anonymousRollCopy(this) : this, message, ...args);
   };
-  game.modules.get(ID).api = Object.freeze({planFor, reveal, postFollowup, manage});
+  game.modules.get(ID).api = Object.freeze({planFor, reveal, postFollowup, manage, requestRecognition, automaticObserver, seesCaster});
 });
 
 Hooks.on('renderChatMessageHTML', renderControls);
