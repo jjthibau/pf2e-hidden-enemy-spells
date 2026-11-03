@@ -177,7 +177,7 @@ function audienceWithin(child, root) {
 // Unknown legacy HTML is left alone; never infer a replacement DC from its caster.
 function followupPrompt(message) {
   const embedded = message.flags.pf2e?.casting?.embeddedSpell;
-  if (typeof message.content !== 'string' || message.content.length > 65536 || embedded?.type !== 'spell'
+  if (message.isRoll || message.rolls?.length || typeof message.content !== 'string' || message.content.length > 65536 || embedded?.type !== 'spell'
       || embedded.system?.slug !== 'unidentified-spell') return null;
   const rank = embedded.system.level?.value, save = embedded.system.defense?.save;
   if (!Number.isInteger(rank) || rank < 1 || rank > 10 || !SAVES.includes(save?.statistic) || typeof save.basic !== 'boolean') return null;

@@ -103,6 +103,7 @@ test('old revealed public roots without a name flag use already-public name, nev
 });
 test('unreconstructable legacy cards remain unchanged rather than receiving invented mechanics', async () => {
   for (const corrupt of [c => delete c.flags.pf2e.casting.embeddedSpell.system.defense.save.basic,
+    c => c.rolls = [{total: 10}],
     c => c.content = c.content.replace('data-dc="31"', 'data-dc="unknown"'), c => c.content = '<p>Unrecognized legacy card</p>',
     c => c.content += '<p>GM custom reminder: additional save timing</p>',
     c => c.flags.pf2e.casting.embeddedSpell.system.level.value = 99]) {
