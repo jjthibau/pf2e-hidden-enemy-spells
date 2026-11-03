@@ -21,6 +21,7 @@
 !/tests/recognition.test.mjs
 !/tests/recognition-context.test.mjs
 !/tests/followup-state.test.mjs
+!/tests/mounted-controls.test.mjs
 **/__pycache__/
 **/*.pyc
 **/.DS_Store

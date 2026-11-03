@@ -291,15 +291,17 @@ async function manage(message) {
   await syncPublic(message, plan);
 }
 
+function refreshSaveLabel(message, button) {
+  const cast = flag(message);
+  if (cast?.role !== 'public' || (cast.revealed && !cast.followup)) return;
+  const showDC = game.user.isGM || game.settings.get('pf2e', 'metagame_showDC');
+  button.textContent = `${showDC ? `DC ${button.dataset.dc} ` : ''}Roll ${saveLabel(button.dataset.save)} Save`;
+}
+
 function renderControls(message, element) {
   renderRecognition(message, element);
   const cast = flag(message);
-  if (cast?.role === 'public' && (!cast.revealed || cast.followup)) {
-    for (const button of element.querySelectorAll('button[data-action="spell-save"]')) {
-      const showDC = game.user.isGM || game.settings.get('pf2e', 'metagame_showDC');
-      button.textContent = `${showDC ? `DC ${button.dataset.dc} ` : ''}Roll ${saveLabel(button.dataset.save)} Save`;
-    }
-  }
+  for (const button of element.querySelectorAll('button[data-action="spell-save"]')) refreshSaveLabel(message, button);
   if (!game.user.isGM || cast?.role !== 'gm' || !message.isContentVisible) return;
   const container = element.querySelector('.message-content');
   if (!container || container.querySelector('.hidden-spell-gm-controls')) return;
@@ -398,13 +400,94 @@ Hooks.once('ready', () => {
 });
 
 Hooks.on('renderChatMessageHTML', renderControls);
-for (const hook of ['createSetting', 'updateSetting', 'deleteSetting']) Hooks.on(hook, setting => {
-  if (setting.key !== 'pf2e.metagame_showDC' || !game.ready) return;
-  for (const message of game.messages) {
-    if (flag(message)?.role === 'public') {
-      void Promise.resolve(ui.chat.updateMessage(message)).catch(error => console.error(ID, error));
+// Settings affect our existing labels, not native chat pagination or window lifecycle.
+// Each continuation charges at most 32 mounted entries/descendants. No history snapshot,
+// source-content parser, native rerender or document write is needed.
+let mountedLabelsEpoch = 0, mountedLabelsRunning = false;
+const labelFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+const connectedElement = element => element instanceof HTMLElement && element.isConnected;
+const readablePublic = message => currentMessage(message) && message.visible === true &&
+  message.isContentVisible === true && flag(message)?.role === 'public';
+
+function* mountedLabelSteps(live) {
+  function* card(message, root, owned) {
+    if (!readablePublic(message) || !owned()) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    for (let node = walker.nextNode(); node && live() && readablePublic(message) && owned(); node = walker.nextNode()) {
+      yield () => {
+        if (live() && readablePublic(message) && owned() && root.contains(node) &&
+          node.matches('button[data-action="spell-save"]')) refreshSaveLabel(message, node);
+      };
     }
   }
+  const chat = ui.chat;
+  for (const host of [chat, chat?.popout]) {
+    const element = host?.element;
+    if (!host?.rendered || !connectedElement(element)) continue;
+    const log = element.querySelector('.chat-log');
+    if (!connectedElement(log)) continue;
+    const horizon = log.children.length;
+    const hostOwned = () => (host === ui.chat || host === ui.chat?.popout) && host.rendered &&
+      host.element === element && connectedElement(element) && element.querySelector('.chat-log') === log && connectedElement(log);
+    for (let i = 0; i < horizon && live(); i++) {
+      const root = log.children.item(i);
+      yield () => {}; // Even irrelevant mounted entries consume the per-frame budget.
+      if (!root?.matches('.message[data-message-id]')) continue;
+      const message = game.messages.get(root.dataset.messageId);
+      const owned = () => hostOwned() && connectedElement(root) && root.parentElement === log &&
+        root.dataset.messageId === message?.id;
+      yield* card(message, root, owned);
+    }
+  }
+  const instances = foundry.applications?.instances, Popout = CONFIG.ChatMessage?.popoutClass;
+  if (!(instances instanceof Map) || typeof Popout !== 'function') return;
+  const iterator = instances.values(), horizon = instances.size;
+  for (let i = 0; i < horizon && live(); i++) {
+    const {value: app, done} = iterator.next();
+    if (done) break;
+    yield () => {};
+    if (!(app instanceof Popout)) continue;
+    const element = app.element, message = app.message;
+    if (!connectedElement(element)) continue;
+    const root = element.querySelector('.message[data-message-id]');
+    const owned = () => instances === foundry.applications?.instances && instances.get(app.id) === app &&
+      CONFIG.ChatMessage?.popoutClass === Popout && app instanceof Popout && app.rendered &&
+      app.element === element && connectedElement(element) && message?.apps?.[app.id] === app &&
+      app.message === message && connectedElement(root) && root.dataset.messageId === message?.id &&
+      element.querySelector('.message[data-message-id]') === root;
+    yield* card(message, root, owned);
+  }
+}
+
+async function refreshMountedLabels() {
+  mountedLabelsRunning = true;
+  let finished = -1;
+  try {
+    do {
+      const epoch = mountedLabelsEpoch;
+      await labelFrame(); // Coalesce native create/update/delete bursts before enumeration.
+      const user = game.user;
+      const live = () => epoch === mountedLabelsEpoch && game.ready && game.user === user && game.socket?.connected === true;
+      if (live()) {
+        let work = 0;
+        for (const step of mountedLabelSteps(live)) {
+          if (!live()) break;
+          step();
+          if (++work === 32) { work = 0; await labelFrame(); }
+        }
+      }
+      finished = epoch;
+    } while (finished !== mountedLabelsEpoch);
+  } catch (error) { finished = mountedLabelsEpoch; console.error(ID, error); }
+  finally {
+    mountedLabelsRunning = false;
+    if (finished !== mountedLabelsEpoch) void refreshMountedLabels();
+  }
+}
+for (const hook of ['createSetting', 'updateSetting', 'deleteSetting']) Hooks.on(hook, setting => {
+  if (setting.key !== 'pf2e.metagame_showDC' || !game.ready) return;
+  mountedLabelsEpoch++;
+  if (!mountedLabelsRunning) void refreshMountedLabels();
 });
 Hooks.on('createChatMessage', message => {
   if (flag(message)?.followup) void reconcileFollowup(message).catch(error => console.error(ID, error));

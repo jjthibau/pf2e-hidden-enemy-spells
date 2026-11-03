@@ -49,7 +49,7 @@ function fixture() {
       }};
     messages.set(id, d); return d;
   };
-  const sandbox = {console, planFor, selectChoice, SAVES, recognitionV1: {apiVersion: 1}, renderRecognition() {},
+  const sandbox = {console, requestAnimationFrame: fn => setImmediate(fn), HTMLElement: class {}, planFor, selectChoice, SAVES, recognitionV1: {apiVersion: 1}, renderRecognition() {},
     setupRecognition() {}, autoRecognize() {}, requestRecognition() {}, automaticObserver() {}, seesCaster() {}, manageRecognitionDC() {},
     Hooks: {once() {}, on: (name, fn) => { const list = hooks.get(name) ?? []; list.push(fn); hooks.set(name, list); }},
     game: {ready: true, user: gm, users, messages, socket: {connected: true}, i18n: {localize: value => value},
@@ -156,16 +156,15 @@ test('reconciliation is idempotent and native update hooks do not generate a wri
   await f.api.reveal(f.privateCard); await f.api.reconcileFollowups(f.root);
   assert.equal(f.calls.updates.filter(u => u.id === c.id).length, 1); assert.equal(f.calls.created.length, 0);
 });
-test('create/update/delete DC settings rerender native public roots/followups, not unrelated settings/private cards', async () => {
-  const f = fixture(), c = f.child(); await f.api.reveal(f.privateCard);
+test('DC settings never rerender unmounted history or private cards', async () => {
+  const f = fixture(); f.child();
   for (const event of ['createSetting', 'updateSetting', 'deleteSetting']) {
-    f.calls.rendered.length = 0;
     for (const callback of f.hooks.get(event)) callback({key: 'pf2e.metagame_showDC'});
-    assert.deepEqual([...f.calls.rendered].sort(), [f.root.id, c.id].sort());
-    f.calls.rendered.length = 0; for (const callback of f.hooks.get(event)) callback({key: 'other.setting'});
+    await new Promise(resolve => setImmediate(resolve));
     assert.equal(f.calls.rendered.length, 0);
   }
 });
+
 test('identified followup native button labels obey current DC visibility without changing mechanical DC', async () => {
   const f = fixture(), c = f.child(); await f.api.reveal(f.privateCard); f.sandbox.game.user = f.pc;
   const button = {dataset: {dc: '31', save: 'fortitude'}}, element = {querySelectorAll: () => [button]};
