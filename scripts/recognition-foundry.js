@@ -12,9 +12,27 @@ function selectedRecognizer() {
   return selected.length === 1 ? selected[0].actor : selected.length ? null : game.user.character;
 }
 
-function updateRecognitionButton(message, button) {
+function validActorUuid(uuid) {
+  return typeof uuid === 'string' && uuid.length <= 256 && !/[\u0000-\u001f\u007f]/.test(uuid)
+    && /^(?:Actor\.[A-Za-z0-9_-]{1,64}|Scene\.[A-Za-z0-9_-]{1,64}\.Token\.[A-Za-z0-9_-]{1,64}\.Actor\.[A-Za-z0-9_-]{1,64})$/.test(uuid);
+}
+function currentOwnedActor(actor, user) {
+  try {
+    const uuid = actor?.uuid;
+    if (!validActorUuid(uuid)) return null;
+    return actor.documentName === 'Actor' && actor.isOfType('character') && fromUuidSync(uuid) === actor
+      && actor.testUserPermission(user, 'OWNER') ? actor : null;
+  } catch { return null; }
+}
+
+function publicRecognition(message, user, requireUnrevealed = true) {
+  const cast = castFlag(message);
+  return game.messages.get(message?.id) === message && cast?.role === 'public' && !cast.followup && (!requireUnrevealed || !cast.revealed)
+    && message.author?.isGM && (user.isGM || !message.blind && (!message.whisper.length || message.whisper.includes(user.id)));
+}
+
+function updateRecognitionButton(message, button, actor = selectedRecognizer()) {
   const tradition = message.flags.pf2e?.casting?.tradition;
-  const actor = selectedRecognizer();
   const plan = recognitionPlan({tradition, rank: 1, skills: actor?.skills ?? {}, feats: actor ? featsOf(actor) : [],
     traits: message.flags.pf2e?.origin?.traits ?? []});
   button.textContent = plan ? `Recognize Spell (${skillLabel(plan.skill)})` : 'Recognize Spell';
@@ -26,6 +44,18 @@ function refreshRecognitionButtons() {
   for (const button of document.querySelectorAll('[data-recognize-spell]')) {
     const message = game.messages.get(button.closest('[data-message-id]')?.dataset.messageId);
     if (message) updateRecognitionButton(message, button);
+  }
+}
+
+/** Refresh native labels only: no selection changes, writes or recognition request. */
+export function refreshRecognitionControls(actor, root = document) {
+  if (!currentOwnedActor(actor, game.user)) return;
+  for (const button of root.querySelectorAll('[data-recognize-spell]')) {
+    if (!button.isConnected || !root.contains(button)) continue;
+    const message = game.messages.get(button.closest('[data-message-id]')?.dataset.messageId);
+    if (message?.visible && message.isContentVisible && publicRecognition(message, game.user) && !castFlag(message).revealed) {
+      updateRecognitionButton(message, button, actor);
+    }
   }
 }
 
@@ -105,18 +135,35 @@ export async function autoRecognize(message) {
 async function resolveRequest(request) {
   const data = request.getFlag(ID, 'recognitionRequest');
   if (!data || request.getFlag(ID, 'recognitionHandled') || busy.has(request.id)) return;
-  const author = request.author;
-  const actor = game.actors.get(data.actor);
-  const target = game.messages.get(data.message);
-  if (!actor?.isOfType('character') || !author || !actor.testUserPermission(author, 'OWNER') ||
-      castFlag(target)?.role !== 'public' || !target.author?.isGM || castFlag(target).followup ||
-      (target.whisper.length && !author.isGM && !target.whisper.includes(author.id))) return;
-  const source = game.messages.find(m => castFlag(m)?.role === 'gm' && castFlag(m).link === castFlag(target).link);
-  if (!source?.item) return;
+  let origin;
+  const context = (allowRevealed = false) => {
+    if (!game.user.isGM || game.users.activeGM?.id !== game.user.id || !game.socket.connected || game.messages.get(request.id) !== request) return null;
+    const author = request.author;
+    if (!author || game.users.get(author.id) !== author) return null;
+    let actor;
+    // A UUID that is present but invalid must never silently select the base Actor.
+    if (Object.hasOwn(data, 'actorUuid')) {
+      if (!validActorUuid(data.actorUuid)) return null;
+      try { actor = fromUuidSync(data.actorUuid); } catch { return null; }
+      if (actor?.uuid !== data.actorUuid) return null;
+    } else actor = game.actors.get(data.actor);
+    if (!currentOwnedActor(actor, author) || actor.id !== data.actor) return null;
+    const target = game.messages.get(data.message);
+    if (!publicRecognition(target, author, !allowRevealed)) return null;
+    const source = game.messages.find(m => m.author?.isGM && m.author.id === target.author.id && castFlag(m)?.role === 'gm' && castFlag(m).link === castFlag(target).link);
+    if (!source?.item) return null;
+    const fresh = {author, actor, target, source};
+    return !origin || Object.keys(fresh).every(key => fresh[key] === origin[key]) ? fresh : null;
+  };
+  origin = context();
+  if (!origin) return;
   busy.add(request.id);
   try {
     // Persist before resolving so reconnects/other GM clients cannot duplicate it.
     await request.setFlag(ID, 'recognitionHandled', true);
+    let fresh = context();
+    if (!fresh) return;
+    let {author, actor, target, source} = fresh;
     const spell = source.item;
     const reason = knownSpellReason(actor, spell);
     if (reason) {
@@ -145,30 +192,42 @@ async function resolveRequest(request) {
       dc: {value: plan.dc, visible: game.settings.get('pf2e', 'metagame_showDC')},
       extraRollOptions: options, messageMode: data.mode === 'self' ? 'gm' : data.mode, skipDialog: true,
       callback: async (_roll, _outcome, message) => {
-        if (data.mode === 'self' && game.pf2e.settings.metagame.secretChecks && message) await message.update({whisper: [author.id]});
+        if (data.mode === 'self' && game.pf2e.settings.metagame.secretChecks && message && context()) await message.update({whisper: [author.id]});
       }});
     if (!roll) throw Error('Recognition roll was cancelled.');
+    fresh = context();
+    if (!fresh) return;
+    ({author, actor, target, source} = fresh);
     const degree = plan.automatic ? Math.max(2, roll.degreeOfSuccess) : roll.degreeOfSuccess;
     const outcome = ['critical failure — choose an incorrect identification', 'failure', 'success',
       plan.hasFeat ? 'critical success — +1 circumstance to AC or saves against this spell' : 'critical success'][degree];
     const autoReveal = degree >= 2 && game.settings.get(ID, 'revealOnRecognition');
     if (autoReveal) await revealCast(source, {recognition: {actor: actor.id, name: actor.name,
       reason: `${degree === 3 ? 'critical success' : 'success'} using ${skillLabel(plan.skill)} to recognize this spell`}});
+    // Our successful reveal is allowed, but its current audience/ownership still gates the result.
+    if (!context(true)) return;
     await resultMessage(target, actor, `${esc(outcome)} identifying <strong>${esc(spell.name)}</strong>.${plan.automatic ? ' Common spell automatically recognized through skill proficiency; rolled for critical success.' : ''} ${autoReveal ? 'The spell card was automatically revealed.' : 'Use the GM Reveal control to share the spell.'}`, {privateResult: true});
   } catch (error) {
-    console.error(ID, error); ui.notifications.error(error.message);
-    await ChatMessage.create({whisper: request.whisper, content: `<p>Spell recognition could not finish: ${esc(error.message)} Ask the GM to resolve it manually.</p>`});
+    if (!context(true)) return;
+    console.error(ID, error); ui.notifications.error('Spell recognition could not finish. Ask the GM to resolve it manually.');
+    await ChatMessage.create({whisper: request.whisper, content: '<p>Spell recognition could not finish. Ask the GM to resolve it manually.</p>'});
   }
   finally {busy.delete(request.id);}
 }
 
 export async function requestRecognition(message, actor) {
-  if (!actor?.isOfType('character') || !actor.isOwner) return ui.notifications.warn('Select one character you own, or assign your character in User Configuration.');
+  if (!currentOwnedActor(actor, game.user)) return ui.notifications.warn('Select one character you own, or assign your character in User Configuration.');
+  if (!publicRecognition(message, game.user) || !message.visible || !message.isContentVisible) return ui.notifications.warn('This spell recognition prompt is no longer available.');
+  if (!game.socket.connected) return ui.notifications.warn('Reconnect before recognizing a spell.');
   if (!game.users.some(u => u.active && u.isGM)) return ui.notifications.warn('A GM must be connected to resolve spell recognition.');
   await ChatMessage.create({speaker: ChatMessage.getSpeaker({actor}), content: `<p>${esc(actor.name)} attempts to recognize the spell.</p>`,
     whisper: [...new Set([game.user.id, ...game.users.filter(u => u.isGM).map(u => u.id)])],
-    flags: {[ID]: {recognitionRequest: {actor: actor.id, message: message.id, mode: game.settings.get('core', 'messageMode')}}}});
+    flags: {[ID]: {recognitionRequest: {actor: actor.id, actorUuid: actor.uuid, message: message.id, mode: game.settings.get('core', 'messageMode')}}}});
 }
+
+export const recognitionV1 = Object.freeze({apiVersion: 1,
+  request: async (message, actor) => { await requestRecognition(message, actor); },
+  refreshControls: refreshRecognitionControls});
 
 export function renderRecognition(message, element) {
   const flag = castFlag(message);

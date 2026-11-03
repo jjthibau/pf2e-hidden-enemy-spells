@@ -1,0 +1,25 @@
+# Mounted Show DC controls follow-up ? 2026-11-03
+
+This source-only follow-up to the recognition-context/follow-up-name candidate replaces the Show DC setting handler's whole-message-collection rerender loop. On the inspected Foundry 14.369 native ChatLog path, `updateMessage` can post an unmounted message and cascade to a sidebar popout with different mounted history. Updating ChatLog also does not refresh a separate single-message popout. Neither native method is needed to update this provider's own save labels.
+
+The existing label policy is factored into one function shared by normal `renderControls` and a coalesced mounted-only traversal. The traversal uses the current native ChatLog and its actual sidebar popout plus the public application registry's exact configured ChatMessage popout instances. Single-message windows must also be rendered, connected, still registered and exactly owned by the current message's `apps` entry. Every touched button is still inside that exact current native root, and the current collection message remains visible/content-visible with public module role. Generation, user and connection drift cancel remaining work. Enumeration has finite initial mounted-entry/application horizons; traversal yields after at most 32 charged entries/element descendants. This bounds our JavaScript work per continuation, not native DOM operation latency or physical-device responsiveness.
+
+Only existing save-button `textContent` changes. No native message/window render, history insertion, document write, recognition-label change, dataset change, button replacement, handler replacement, native cursor access or history scan occurs. Consequently native focus, window position and minimized state are not changed by this handler.
+
+Verification: 72 portable tests pass, including 11 new registered-hook native-shaped cases and the updated existing unmounted-history test. Cases cover all three setting hooks; asymmetric sidebar history; owned versus forged/unregistered/closed popouts; permission, document and mounted-root drift during continuation; coalescing and cancellation; current strict/permissive/GM and revealed-follow-up policy; unchanged handlers/datasets; and forbidden history/render/write collaborators. The build and release verifier pass with the same exact nine-file package and unchanged 0.2.2 version. This is source evidence only: no native browser session, runtime staging, release, deployment or combined app/API acceptance was performed for this follow-up. The additive explicit-character API and previously recorded evidence retain their existing scope.
+
+## Bounded combined native follow-up
+
+The source-only verification above is historical. A later isolated desktop-browser run combined this unreleased API candidate with a mobile host on Foundry 14.369 / PF2e 8.6.0. Published/live remains **0.2.2**; no release, deployment or package/version change is implied.
+
+The bounded run verified:
+
+- An explicitly viewed fixture character, rather than the account's assigned character, made an actual Arcana roll of 29 with the correct linked-token speaker. The assigned character was not changed.
+- An actual synthetic `Scene.Token.Actor` with a matching known repertoire spell revealed directly, naming the recognizing character and reason, with no die roll.
+- Existing and later follow-up cards retained the expected revealed name, native mechanics and audience. An original Will save dispatched once for the correct Actor/token.
+- Strict/permissive Show DC setting creation, update and deletion refreshed the mounted native root and an owned single-message popout. The genuinely old unmounted source stayed unmounted; the 99 mounted card IDs, scroll and draft remained unchanged. One measured refresh had a 5.33 ms round trip and settled at 103.37 ms; this single observation is **not a benchmark**.
+- Actual player disconnection and ownership loss refused recognition. The published 0.2.2 implementation without the new API retained its explicit legacy fallback.
+
+Exact restoration removed 126 owned messages, three fixture Actors, one Scene and three Tokens. The original 105 messages, twelve raw document collections, settings and User semantics were preserved. Original application files were restored with exact bytes/presence (11 present, 32 absent); the added Hidden Spells metadata was absent again, protected dependency files and connection page were restored, and final health showed zero connected users, zero page errors and the same process. Detailed receipts remain local and private; no credentials, document IDs, campaign data or private receipt links are published here.
+
+This evidence does not establish tablet, emulator, physical-device, supported-current-WebView or GM-failover behavior. The unchanged older line-of-sight/rarity matrix was intentionally not rerun. No full byte snapshot of a previously rolled message was taken, so this run does not claim byte-for-byte preservation of such a message. Submission still has no completion/acknowledgement receipt or cross-client exactly-once guarantee. These limits remain separate from the bounded native cases above.

@@ -1,11 +1,12 @@
 import {planFor, selectChoice, SAVES} from './plans.js';
-import {autoRecognize, setupRecognition, renderRecognition, requestRecognition, automaticObserver, seesCaster, manageRecognitionDC} from './recognition-foundry.js';
+import {autoRecognize, setupRecognition, renderRecognition, requestRecognition, recognitionV1, automaticObserver, seesCaster, manageRecognitionDC} from './recognition-foundry.js';
 
 const ID = 'pf2e-hidden-enemy-spells';
 const TITLE = 'Unidentified Spell';
 const pending = new WeakMap();
 const casting = new Set();
 const acting = new Set();
+const followupSyncs = new WeakMap();
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clone = value => foundry.utils.deepClone(value);
 const gmIds = () => game.users.filter(u => u.isGM).map(u => u.id);
@@ -76,10 +77,10 @@ async function editPlan(spell, plan) {
 
 // Minimal anonymous embedded spell: PF2e's spell-save handler retains the
 // caster, traits, heightened rank, incapacitation and native roll dialogs.
-function anonymousSpell(spell, saves) {
+function anonymousSpell(spell, saves, name = TITLE) {
   const traits = [...new Set([...spell.system.traits.value, ...saves.flatMap(s => s.traits ?? [])])];
   return {
-    _id: foundry.utils.randomID(), name: TITLE, type: 'spell', img: 'icons/svg/mystery-man.svg',
+    _id: foundry.utils.randomID(), name, type: 'spell', img: 'icons/svg/mystery-man.svg',
     system: {
       level: {value: spell.rank}, slug: 'unidentified-spell', description: {value: ''},
       traits: {value: traits, traditions: [...spell.traditions]},
@@ -89,26 +90,31 @@ function anonymousSpell(spell, saves) {
   };
 }
 
-function publicSource(spell, plan, {link, speaker, followup = false, whisper = [], blind = false} = {}) {
-  const dc = spell.spellcasting?.statistic?.withRollOptions({item: spell}).dc.value ?? null;
-  if (plan.initial.some(save => !SAVES.includes(save.type) || !Number.isInteger(save.dc ?? dc) || (save.dc ?? dc) < 1)) {
-    throw new Error('Every save needs a valid spellcasting DC or an explicit positive DC.');
-  }
-  const anon = anonymousSpell(spell, plan.initial);
-  const visible = game.settings.get('pf2e', 'metagame_showDC');
-  const buttons = plan.initial.map(save => {
-    const saveDC = save.dc ?? dc;
+function saveCardContent({rank, actorId, saves, name = TITLE, followup = false, targetChoice = false,
+  visible = game.settings.get('pf2e', 'metagame_showDC')}) {
+  const buttons = saves.map(save => {
+    const saveDC = save.dc;
     const label = `Roll ${saveLabel(save.type)} Save`;
     return `<button type="button" data-action="spell-save" data-save="${save.type}" data-dc="${saveDC}"><span data-visibility="${visible ? 'all' : 'gm'}">DC ${saveDC} </span>${esc(label)}</button>`;
   }).join('');
+  return `<div class="pf2e chat-card item-card pf2e-hidden-spell" data-cast-rank="${rank}" data-actor-id="${esc(actorId)}">
+      <header class="hidden-spell-header"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i><h3>${esc(name)}${followup ? ' — Follow-up' : ''}</h3></header>
+      ${targetChoice && saves.length > 1 ? '<p>Choose one saving throw.</p>' : ''}
+      <section class="card-buttons">${buttons}</section></div>`;
+}
+
+function publicSource(spell, plan, {link, speaker, followup = false, whisper = [], blind = false, name} = {}) {
+  const dc = spell.spellcasting?.statistic?.withRollOptions({item: spell}).dc.value ?? null;
+  const saves = plan.initial.map(save => ({...save, dc: save.dc ?? dc}));
+  if (saves.some(save => !SAVES.includes(save.type) || !Number.isInteger(save.dc) || save.dc < 1)) {
+    throw new Error('Every save needs a valid spellcasting DC or an explicit positive DC.');
+  }
+  const anon = anonymousSpell(spell, saves, name);
   return {
     speaker, whisper, blind, style: CONST.CHAT_MESSAGE_STYLES.OTHER,
-    content: `<div class="pf2e chat-card item-card pf2e-hidden-spell" data-cast-rank="${spell.rank}" data-actor-id="${esc(spell.actor.id)}">
-      <header class="hidden-spell-header"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i><h3>${TITLE}${followup ? ' — Follow-up' : ''}</h3></header>
-      ${plan.targetChoice && plan.initial.length > 1 ? '<p>Choose one saving throw.</p>' : ''}
-      <section class="card-buttons">${buttons}</section></div>`,
+    content: saveCardContent({rank: spell.rank, actorId: spell.actor.id, saves, name, followup, targetChoice: plan.targetChoice}),
     flags: {
-      [ID]: {cast: {role: 'public', link, revealed: false, followup}},
+      [ID]: {cast: {role: 'public', link, revealed: !!name, followup, ...(name ? {revealedName: name} : {})}},
       pf2e: {origin: {castRank: spell.rank, traits: anon.system.traits.value},
         casting: {id: spell.spellcasting?.id, tradition: spell.spellcasting?.tradition ?? 'arcane', embeddedSpell: anon}},
     },
@@ -136,20 +142,110 @@ async function hideCast(spell, original, event, options) {
 
 function partner(message) {
   const cast = flag(message);
-  return game.messages.find(m => flag(m)?.link === cast?.link && flag(m)?.role === 'public' && !flag(m)?.followup);
+  const roots = game.messages.filter(m => trustedPublic(m) && flag(m).link === cast?.link && !flag(m).followup && sameCaster(m, message));
+  return roots.length === 1 ? roots[0] : null;
+}
+
+function currentMessage(message) { return !!message && game.messages.get(message.id) === message; }
+function trustedPublic(message) {
+  const cast = flag(message);
+  return currentMessage(message) && message.author?.isGM && cast?.role === 'public'
+    && typeof cast.link === 'string' && cast.link.length > 0 && cast.link.length <= 64 && !/[^A-Za-z0-9_-]/.test(cast.link);
+}
+function sameCaster(a, b) {
+  return !!a.speaker?.actor && ['actor', 'token', 'scene'].every(key => (a.speaker?.[key] ?? '') === (b.speaker?.[key] ?? ''));
+}
+function writable(message) {
+  return game.user.isGM && game.socket.connected && currentMessage(message) && message.canUserModify(game.user, 'update');
+}
+function reconciliationWriter() {
+  return game.user.isGM && game.socket.connected && (!game.users.activeGM || game.users.activeGM.id === game.user.id);
+}
+function revealedName(root) {
+  if (!trustedPublic(root) || flag(root).followup || !flag(root).revealed) return null;
+  const name = flag(root).revealedName ?? root.item?.name;
+  return typeof name === 'string' && name.length > 0 && name.length <= 200 && !/[\u0000-\u001f\u007f]/.test(name) ? name : null;
+}
+function audienceWithin(child, root) {
+  const gms = gmIds();
+  const readers = message => message.blind ? gms : message.whisper.length ? [...new Set([...gms, ...message.whisper])] : null;
+  const allowed = readers(root), actual = readers(child);
+  return allowed === null || actual !== null && actual.every(id => allowed.includes(id));
+}
+
+// Read only the mechanics already present in a module's single-save follow-up.
+// Unknown legacy HTML is left alone; never infer a replacement DC from its caster.
+function followupPrompt(message) {
+  const embedded = message.flags.pf2e?.casting?.embeddedSpell;
+  if (message.isRoll || message.rolls?.length || typeof message.content !== 'string' || message.content.length > 65536 || embedded?.type !== 'spell'
+      || embedded.system?.slug !== 'unidentified-spell') return null;
+  const rank = embedded.system.level?.value, save = embedded.system.defense?.save;
+  if (!Number.isInteger(rank) || rank < 1 || rank > 10 || !SAVES.includes(save?.statistic) || typeof save.basic !== 'boolean') return null;
+  const template = document.createElement('template'); template.innerHTML = message.content;
+  const cards = template.content.querySelectorAll('.pf2e-hidden-spell');
+  if (cards.length !== 1 || Number(cards[0].dataset.castRank) !== rank || cards[0].dataset.actorId !== message.speaker.actor) return null;
+  const buttons = cards[0].querySelectorAll('button[data-action="spell-save"]');
+  if (buttons.length !== 1 || buttons[0].dataset.save !== save.statistic || !/^\d{1,16}$/.test(buttons[0].dataset.dc ?? '')) return null;
+  const dc = Number(buttons[0].dataset.dc);
+  if (!Number.isSafeInteger(dc) || dc < 1) return null;
+  const prompt = {rank, actorId: message.speaker.actor, saves: [{type: save.statistic, basic: save.basic, dc}], followup: true};
+  // Do not discard a GM's extra notes, custom mechanics or an unknown legacy format.
+  const normalized = content => content.replace(/\s+/g, ' ').trim();
+  if (![false, true].some(visible => normalized(saveCardContent({...prompt, name: embedded.name, visible})) === normalized(message.content))) return null;
+  return prompt;
+}
+
+async function reconcileFollowupNow(message) {
+  if (!reconciliationWriter() || !trustedPublic(message) || !flag(message).followup || !writable(message)) return;
+  const root = partner(message);
+  if (!root) return;
+  const name = audienceWithin(message, root) ? revealedName(root) : null;
+  const desired = name ?? TITLE, cast = flag(message), embedded = message.flags.pf2e?.casting?.embeddedSpell;
+  const prompt = followupPrompt(message);
+  if (!prompt) return;
+  const content = saveCardContent({...prompt, name: desired});
+  if (cast.revealed === !!name && (cast.revealedName ?? null) === name && embedded?.name === desired && message.content === content) return;
+  // No await between these fresh identity/role/audience checks and the native write.
+  const update = {content, [`flags.${ID}.cast.revealed`]: !!name,
+    'flags.pf2e.casting.embeddedSpell.name': desired};
+  if (name) update[`flags.${ID}.cast.revealedName`] = name;
+  else update[`flags.${ID}.cast.-=revealedName`] = null;
+  await message.update(update);
+}
+
+function reconcileFollowup(message) {
+  if (!message) return Promise.resolve();
+  const pending = followupSyncs.get(message);
+  if (pending) { pending.dirty = true; return pending.task; }
+  const entry = {dirty: false};
+  entry.task = (async () => {
+    do { entry.dirty = false; await reconcileFollowupNow(message); } while (entry.dirty);
+  })().finally(() => followupSyncs.delete(message));
+  followupSyncs.set(message, entry);
+  return entry.task;
+}
+
+async function reconcileFollowups(root) {
+  if (!reconciliationWriter() || !trustedPublic(root) || flag(root).followup) return;
+  for (const message of game.messages.filter(m => flag(m)?.followup && flag(m).link === flag(root).link)) await reconcileFollowup(message);
 }
 
 async function reveal(message, {recognition} = {}) {
-  if (!game.user.isGM || flag(message)?.role !== 'gm') return;
+  if (!writable(message) || !message.author?.isGM || flag(message)?.role !== 'gm') return;
   const target = partner(message);
   if (!target) return ui.notifications.warn('The anonymous spell card has been deleted.');
-  if (flag(target).revealed) return;
-  const attribution = recognition ? `<aside class="hidden-spell-recognition" role="note"><strong>Automatically recognized by ${esc(recognition.name)}</strong><br>${esc(recognition.reason)}.</aside>` : '';
-  const update = {content: attribution + message.content, 'flags.pf2e': clone(message.flags.pf2e), [`flags.${ID}.cast.revealed`]: true};
-  if (recognition) update[`flags.${ID}.cast.recognition`] = clone(recognition);
-  if (!message.flags.pf2e.casting?.embeddedSpell) update['flags.pf2e.casting.-=embeddedSpell'] = null;
-  await target.update(update);
-  message.render(true);
+  if (!writable(target)) return;
+  if (!flag(target).revealed) {
+    const attribution = recognition ? `<aside class="hidden-spell-recognition" role="note"><strong>Automatically recognized by ${esc(recognition.name)}</strong><br>${esc(recognition.reason)}.</aside>` : '';
+    const update = {content: attribution + message.content, 'flags.pf2e': clone(message.flags.pf2e), [`flags.${ID}.cast.revealed`]: true,
+      [`flags.${ID}.cast.revealedName`]: message.item.name};
+    if (recognition) update[`flags.${ID}.cast.recognition`] = clone(recognition);
+    if (!message.flags.pf2e.casting?.embeddedSpell) update['flags.pf2e.casting.-=embeddedSpell'] = null;
+    await target.update(update);
+    message.render(true);
+  }
+  // Retrying an already-revealed root must still repair a failed child update.
+  await reconcileFollowups(target);
 }
 
 async function postFollowup(message, index) {
@@ -168,10 +264,14 @@ async function postFollowup(message, index) {
       dc:Number(button.form.elements.dc.value), traits:button.form.elements.incapacitation.checked?['incapacitation']:[]})}],
     close: () => null, rejectClose: false,
   });
-  if (!save) return;
-  await ChatMessage.create(publicSource(message.item, {initial: [save]}, {
-    link: flag(message).link, speaker: message.speaker, followup: true, whisper: root.whisper, blind: root.blind,
+  if (!save || !writable(message) || !message.author?.isGM) return;
+  const currentRoot = partner(message);
+  if (!currentRoot || !writable(currentRoot)) return;
+  const created = await ChatMessage.create(publicSource(message.item, {initial: [save]}, {
+    link: flag(message).link, speaker: message.speaker, followup: true, whisper: [...currentRoot.whisper], blind: currentRoot.blind,
+    name: revealedName(currentRoot) ?? undefined,
   }), {renderSheet:false});
+  await reconcileFollowup(created);
 }
 
 async function syncPublic(message, plan) {
@@ -191,15 +291,17 @@ async function manage(message) {
   await syncPublic(message, plan);
 }
 
+function refreshSaveLabel(message, button) {
+  const cast = flag(message);
+  if (cast?.role !== 'public' || (cast.revealed && !cast.followup)) return;
+  const showDC = game.user.isGM || game.settings.get('pf2e', 'metagame_showDC');
+  button.textContent = `${showDC ? `DC ${button.dataset.dc} ` : ''}Roll ${saveLabel(button.dataset.save)} Save`;
+}
+
 function renderControls(message, element) {
   renderRecognition(message, element);
   const cast = flag(message);
-  if (cast?.role === 'public' && !cast.revealed) {
-    for (const button of element.querySelectorAll('button[data-action="spell-save"]')) {
-      const showDC = game.user.isGM || game.settings.get('pf2e', 'metagame_showDC');
-      button.textContent = `${showDC ? `DC ${button.dataset.dc} ` : ''}Roll ${saveLabel(button.dataset.save)} Save`;
-    }
-  }
+  for (const button of element.querySelectorAll('button[data-action="spell-save"]')) refreshSaveLabel(message, button);
   if (!game.user.isGM || cast?.role !== 'gm' || !message.isContentVisible) return;
   const container = element.querySelector('.message-content');
   if (!container || container.querySelector('.hidden-spell-gm-controls')) return;
@@ -207,7 +309,7 @@ function renderControls(message, element) {
   controls.className = 'hidden-spell-gm-controls gm-controls';
   const revealed = !!flag(partner(message))?.revealed;
   controls.innerHTML = `<p><strong>Hidden spell — GM controls</strong></p>
-    <button type="button" data-hidden-action="reveal" ${revealed ? 'disabled' : ''}>${revealed ? 'Spell revealed' : 'Reveal spell to players'}</button>
+    <button type="button" data-hidden-action="reveal">${revealed ? 'Refresh follow-up names' : 'Reveal spell to players'}</button>
     <button type="button" data-hidden-action="manage">Manage saving throws</button>
     <button type="button" data-hidden-action="recognition-dc">Recognition DC override</button>
     ${(cast.plan?.followups ?? []).map((save, i) => `<p>${esc(save.condition)}<button type="button" data-hidden-action="followup" data-index="${i}">Post ${esc(saveLabel(save.type))} follow-up</button></p>`).join('')}
@@ -222,7 +324,10 @@ function renderControls(message, element) {
       if (button.dataset.hiddenAction === 'recognition-dc') await manageRecognitionDC(message);
       if (button.dataset.hiddenAction === 'followup') await postFollowup(message, Number(button.dataset.index));
     } catch (error) {console.error(ID, error); ui.notifications.error(error.message);}
-    finally {acting.delete(message.id); button.disabled = button.dataset.hiddenAction === 'reveal' && !!flag(partner(message))?.revealed;}
+    finally {
+      acting.delete(message.id); button.disabled = false;
+      if (button.dataset.hiddenAction === 'reveal' && flag(partner(message))?.revealed) button.textContent = 'Refresh follow-up names';
+    }
   });
   container.prepend(controls);
 }
@@ -291,17 +396,106 @@ Hooks.once('ready', () => {
     const hidden = game.user.isGM && flag(message)?.role === 'gm' && !flag(partner(message))?.revealed;
     return originalTemplate.call(hidden ? anonymousRollCopy(this) : this, message, ...args);
   };
-  game.modules.get(ID).api = Object.freeze({planFor, reveal, postFollowup, manage, requestRecognition, automaticObserver, seesCaster});
+  game.modules.get(ID).api = Object.freeze({planFor, reveal, postFollowup, manage, requestRecognition, recognitionV1, automaticObserver, seesCaster});
 });
 
 Hooks.on('renderChatMessageHTML', renderControls);
-Hooks.on('updateSetting', setting => {
-  if (setting.key !== 'pf2e.metagame_showDC' || !game.ready) return;
-  for (const message of game.messages) {
-    if (flag(message)?.role === 'public' && !flag(message).revealed) {
-      void Promise.resolve(ui.chat.updateMessage(message)).catch(error => console.error(ID, error));
+// Settings affect our existing labels, not native chat pagination or window lifecycle.
+// Each continuation charges at most 32 mounted entries/descendants. No history snapshot,
+// source-content parser, native rerender or document write is needed.
+let mountedLabelsEpoch = 0, mountedLabelsRunning = false;
+const labelFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+const connectedElement = element => element instanceof HTMLElement && element.isConnected;
+const readablePublic = message => currentMessage(message) && message.visible === true &&
+  message.isContentVisible === true && flag(message)?.role === 'public';
+
+function* mountedLabelSteps(live) {
+  function* card(message, root, owned) {
+    if (!readablePublic(message) || !owned()) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    for (let node = walker.nextNode(); node && live() && readablePublic(message) && owned(); node = walker.nextNode()) {
+      yield () => {
+        if (live() && readablePublic(message) && owned() && root.contains(node) &&
+          node.matches('button[data-action="spell-save"]')) refreshSaveLabel(message, node);
+      };
     }
   }
+  const chat = ui.chat;
+  for (const host of [chat, chat?.popout]) {
+    const element = host?.element;
+    if (!host?.rendered || !connectedElement(element)) continue;
+    const log = element.querySelector('.chat-log');
+    if (!connectedElement(log)) continue;
+    const horizon = log.children.length;
+    const hostOwned = () => (host === ui.chat || host === ui.chat?.popout) && host.rendered &&
+      host.element === element && connectedElement(element) && element.querySelector('.chat-log') === log && connectedElement(log);
+    for (let i = 0; i < horizon && live(); i++) {
+      const root = log.children.item(i);
+      yield () => {}; // Even irrelevant mounted entries consume the per-frame budget.
+      if (!root?.matches('.message[data-message-id]')) continue;
+      const message = game.messages.get(root.dataset.messageId);
+      const owned = () => hostOwned() && connectedElement(root) && root.parentElement === log &&
+        root.dataset.messageId === message?.id;
+      yield* card(message, root, owned);
+    }
+  }
+  const instances = foundry.applications?.instances, Popout = CONFIG.ChatMessage?.popoutClass;
+  if (!(instances instanceof Map) || typeof Popout !== 'function') return;
+  const iterator = instances.values(), horizon = instances.size;
+  for (let i = 0; i < horizon && live(); i++) {
+    const {value: app, done} = iterator.next();
+    if (done) break;
+    yield () => {};
+    if (!(app instanceof Popout)) continue;
+    const element = app.element, message = app.message;
+    if (!connectedElement(element)) continue;
+    const root = element.querySelector('.message[data-message-id]');
+    const owned = () => instances === foundry.applications?.instances && instances.get(app.id) === app &&
+      CONFIG.ChatMessage?.popoutClass === Popout && app instanceof Popout && app.rendered &&
+      app.element === element && connectedElement(element) && message?.apps?.[app.id] === app &&
+      app.message === message && connectedElement(root) && root.dataset.messageId === message?.id &&
+      element.querySelector('.message[data-message-id]') === root;
+    yield* card(message, root, owned);
+  }
+}
+
+async function refreshMountedLabels() {
+  mountedLabelsRunning = true;
+  let finished = -1;
+  try {
+    do {
+      const epoch = mountedLabelsEpoch;
+      await labelFrame(); // Coalesce native create/update/delete bursts before enumeration.
+      const user = game.user;
+      const live = () => epoch === mountedLabelsEpoch && game.ready && game.user === user && game.socket?.connected === true;
+      if (live()) {
+        let work = 0;
+        for (const step of mountedLabelSteps(live)) {
+          if (!live()) break;
+          step();
+          if (++work === 32) { work = 0; await labelFrame(); }
+        }
+      }
+      finished = epoch;
+    } while (finished !== mountedLabelsEpoch);
+  } catch (error) { finished = mountedLabelsEpoch; console.error(ID, error); }
+  finally {
+    mountedLabelsRunning = false;
+    if (finished !== mountedLabelsEpoch) void refreshMountedLabels();
+  }
+}
+for (const hook of ['createSetting', 'updateSetting', 'deleteSetting']) Hooks.on(hook, setting => {
+  if (setting.key !== 'pf2e.metagame_showDC' || !game.ready) return;
+  mountedLabelsEpoch++;
+  if (!mountedLabelsRunning) void refreshMountedLabels();
+});
+Hooks.on('createChatMessage', message => {
+  if (flag(message)?.followup) void reconcileFollowup(message).catch(error => console.error(ID, error));
+});
+Hooks.on('updateChatMessage', message => {
+  if (flag(message)?.role !== 'public') return;
+  const task = flag(message).followup ? reconcileFollowup(message) : reconcileFollowups(message);
+  void task.catch(error => console.error(ID, error));
 });
 Hooks.on('updateChatMessage', (message, changes, _options, userId) => {
   if (!game.user.isGM || userId !== game.user.id || flag(message)?.role !== 'gm' || !('content' in changes)) return;
