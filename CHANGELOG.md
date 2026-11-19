@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- Preserve repeated save phases. Recover the anonymous card from the GM record with the original audience. Include the mobile recognition API and follow-up fixes.
+
 ## 0.2.2
 
 - Recognition buttons show only the required skill, for example Recognize Spell (Arcana).

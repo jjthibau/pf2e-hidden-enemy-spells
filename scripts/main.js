@@ -36,14 +36,19 @@ async function resolvePlan(spell, existing) {
 }
 
 async function editPlan(spell, plan) {
-  const rows = SAVES.map(type => {
-    const initial = plan.initial.find(s => s.type === type), later = plan.followups.find(s => s.type === type);
-    return `<div class="form-group"><label>${esc(saveLabel(type))}</label><div class="form-fields">
-      <select name="phase-${type}"><option value="none">Not requested</option>
-      <option value="initial" ${initial ? 'selected' : ''}>Initial save</option>
-      <option value="later" ${!initial && later ? 'selected' : ''}>GM posts later</option></select>
-      <label><input type="checkbox" name="basic-${type}" ${initial?.basic || later?.basic ? 'checked' : ''}> Basic</label>
-      <label>DC <input type="number" name="dc-${type}" min="1" step="1" placeholder="Spell DC" value="${initial?.dc ?? later?.dc ?? ''}"></label></div></div>`;
+  const phases = [
+    ...plan.initial.map(save => ({save, phase: 'initial'})),
+    ...plan.followups.map(save => ({save, phase: 'later'})),
+    ...SAVES.filter(type => ![...plan.initial, ...plan.followups].some(save => save.type === type))
+      .map(type => ({save: {type}, phase: 'none'})),
+  ];
+  const rows = phases.map(({save, phase}, index) => {
+    return `<div class="form-group"><label>${esc(saveLabel(save.type))}${save.condition ? ` · ${esc(save.condition)}` : ''}</label><div class="form-fields">
+      <select name="phase-${index}"><option value="none">Not requested</option>
+      <option value="initial" ${phase === 'initial' ? 'selected' : ''}>Initial save</option>
+      <option value="later" ${phase === 'later' ? 'selected' : ''}>GM posts later</option></select>
+      <label><input type="checkbox" name="basic-${index}" ${save.basic ? 'checked' : ''}> Basic</label>
+      <label>DC <input type="number" name="dc-${index}" min="1" step="1" placeholder="Spell DC" value="${save.dc ?? ''}"></label></div></div>`;
   }).join('');
   return foundry.applications.api.DialogV2.wait({
     window: {title: `${spell.name}: review saving throws`}, position: {width: 650},
@@ -57,14 +62,13 @@ async function editPlan(spell, plan) {
       const result = {...clone(plan), initial: [], followups: [], review: false, targetChoice: form.elements.relationship.value === 'choice'};
       delete result.choices;
       delete result.overlayId;
-      for (const type of SAVES) {
-        const phase = form.elements[`phase-${type}`].value;
-        const previous = plan.initial.find(s => s.type === type) ?? plan.followups.find(s => s.type === type);
-        const dc = Number(form.elements[`dc-${type}`].value);
-        const save = {...clone(previous ?? {}), type, basic: form.elements[`basic-${type}`].checked};
+      for (const [index, {save: previous}] of phases.entries()) {
+        const phase = form.elements[`phase-${index}`].value;
+        const dc = Number(form.elements[`dc-${index}`].value);
+        const save = {...clone(previous), basic: form.elements[`basic-${index}`].checked};
         if (dc > 0 && Number.isInteger(dc)) save.dc = dc; else delete save.dc;
         if (phase === 'initial') result.initial.push(save);
-        if (phase === 'later') result.followups.push({...save, condition: 'Post when the spell’s instructions require this save.'});
+        if (phase === 'later') result.followups.push({...save, condition: save.condition ?? 'Post when the spell’s instructions require this save.'});
       }
       if (form.elements.relationship.value === 'caster' && result.initial.length > 1) {
         result.choices = result.initial.map(save => ({label: saveLabel(save.type), initial: [save]}));
@@ -131,18 +135,27 @@ async function hideCast(spell, original, event, options) {
   // Explicit private/blind roll modes never become a public announcement.
   const publicData = publicSource(draft.item ?? spell, plan, {link, speaker: source.speaker, whisper: source.whisper, blind: source.blind});
   source.whisper = gmIds(); source.blind = false;
-  source.flags[ID] = {cast: {role: 'gm', link, plan}};
+  source.flags[ID] = {cast: {role: 'gm', link, plan, audience: {whisper: [...publicData.whisper], blind: publicData.blind === true}}};
   const privateCard = await ChatMessage.create(source, {renderSheet: false});
-  try { await ChatMessage.create(publicData, {renderSheet: false}); }
-  catch (error) {ui.notifications.error('The spell remains GM-only: the anonymous card could not be posted.'); throw error;}
+  if (!privateCard) return privateCard;
+  try {
+    if (!await ChatMessage.create(publicData, {renderSheet: false})) throw Error('Anonymous spell card creation was cancelled.');
+  } catch (error) {
+    console.error(ID, error);
+    ui.notifications.error('The spell remains GM-only. Use Post anonymous card on its GM card to finish posting.');
+    return privateCard;
+  }
   try {await autoRecognize(privateCard);}
   catch (error) {console.error(ID, error); ui.notifications.warn('Automatic recognition could not be confirmed; use the recognition or GM Reveal button.');}
   return privateCard;
 }
 
-function partner(message) {
+function partners(message) {
   const cast = flag(message);
-  const roots = game.messages.filter(m => trustedPublic(m) && flag(m).link === cast?.link && !flag(m).followup && sameCaster(m, message));
+  return game.messages.filter(m => trustedPublic(m) && flag(m).link === cast?.link && !flag(m).followup && sameCaster(m, message));
+}
+function partner(message) {
+  const roots = partners(message);
   return roots.length === 1 ? roots[0] : null;
 }
 
@@ -160,6 +173,20 @@ function writable(message) {
 }
 function reconciliationWriter() {
   return game.user.isGM && game.socket.connected && (!game.users.activeGM || game.users.activeGM.id === game.user.id);
+}
+async function recoverPublic(message) {
+  const cast = flag(message);
+  if (!writable(message) || !message.author?.isGM || cast?.role !== 'gm' || !cast.audience) return;
+  if (!reconciliationWriter()) return ui.notifications.warn('Ask the active GM to post this anonymous card.');
+  const existing = partners(message);
+  if (existing.length !== 0) return existing[0];
+  const data = publicSource(message.item, cast.plan, {
+    link: cast.link, speaker: message.speaker, whisper: [...cast.audience.whisper], blind: cast.audience.blind,
+  });
+  const created = await ChatMessage.create(data, {renderSheet: false});
+  if (!created) throw Error('The anonymous spell card could not be posted.');
+  message.render(true);
+  return created;
 }
 function revealedName(root) {
   if (!trustedPublic(root) || flag(root).followup || !flag(root).revealed) return null;
@@ -309,6 +336,7 @@ function renderControls(message, element) {
   controls.className = 'hidden-spell-gm-controls gm-controls';
   const revealed = !!flag(partner(message))?.revealed;
   controls.innerHTML = `<p><strong>Hidden spell — GM controls</strong></p>
+    ${!partner(message) && cast.audience ? '<button type="button" data-hidden-action="recover">Post anonymous card</button>' : ''}
     <button type="button" data-hidden-action="reveal">${revealed ? 'Refresh follow-up names' : 'Reveal spell to players'}</button>
     <button type="button" data-hidden-action="manage">Manage saving throws</button>
     <button type="button" data-hidden-action="recognition-dc">Recognition DC override</button>
@@ -319,6 +347,7 @@ function renderControls(message, element) {
     if (!button || acting.has(message.id)) return;
     event.preventDefault(); event.stopPropagation(); acting.add(message.id); button.disabled = true;
     try {
+      if (button.dataset.hiddenAction === 'recover') await recoverPublic(message);
       if (button.dataset.hiddenAction === 'reveal') await reveal(message);
       if (button.dataset.hiddenAction === 'manage') await manage(message);
       if (button.dataset.hiddenAction === 'recognition-dc') await manageRecognitionDC(message);

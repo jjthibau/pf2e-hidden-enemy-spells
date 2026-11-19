@@ -59,7 +59,7 @@ function fixture() {
     document: {createElement: tag => { assert.equal(tag, 'template'); return templatePort(); }},
     ui: {chat: {updateMessage: async m => calls.rendered.push(m.id)}, notifications: {warn: text => calls.warnings.push(text)}},
     ChatMessage: {create: async data => { const created = doc(data); calls.created.push(created); await sandbox.afterCreate?.(created); return created; }}};
-  vm.runInNewContext(source + '\nglobalThis.probe={publicSource,reveal,postFollowup,reconcileFollowups,reconcileFollowup,renderControls};', sandbox);
+  vm.runInNewContext(source + '\nglobalThis.probe={publicSource,reveal,postFollowup,reconcileFollowups,reconcileFollowup,renderControls,editPlan};', sandbox);
   const api = sandbox.probe, speaker = {actor: 'caster', scene: 'scene', token: 'token'};
   const privateCard = doc({speaker, whisper: [gm.id], blind: false, content: '<h3>Identified &lt;spell&gt;</h3>',
     flags: {[ID]: {cast: {role: 'gm', link: 'link', plan: {followups: [{type: 'fortitude', basic: false, traits: ['incapacitation'], dc: 31}]}}},
@@ -69,6 +69,30 @@ function fixture() {
     {link: 'link', speaker, followup: true}), ...overrides}); }
   return {sandbox, api, calls, doc, gm, pc, users, messages, spell, privateCard, root, child, hooks, setDC: x => showDC = x};
 }
+test('plan editing preserves ordered repeated saves and each phase’s independent metadata', async () => {
+  const f=fixture();f.spell.system.description={value:'Practice description'};
+  const plan={initial:[{type:'will',basic:true,dc:26,traits:['mental']},{type:'reflex',basic:false,dc:25}],
+    followups:[{type:'will',basic:false,dc:28,traits:['incapacitation'],condition:'After the second round'}]};
+  let change=false;
+  f.sandbox.foundry.applications={api:{DialogV2:{wait:async config=>{
+    assert.match(config.content,/After the second round/);
+    const elements={relationship:{value:'all'}};
+    const rows=[...plan.initial,...plan.followups,{type:'fortitude'}];
+    for (const [index,save] of rows.entries()) {
+      elements[`phase-${index}`]={value:index<2?'initial':index===2?'later':'none'};
+      elements[`basic-${index}`]={checked:!!save.basic};
+      elements[`dc-${index}`]={value:index===2&&change?'32':String(save.dc??'')};
+    }
+    return config.buttons[0].callback(null,{form:{elements}});
+  }}}};
+  const unchanged=plain(await f.api.editPlan(f.spell,plan));
+  assert.deepEqual(unchanged.initial,plan.initial);
+  assert.deepEqual(unchanged.followups,plan.followups);
+  change=true;
+  const revised=plain(await f.api.editPlan(f.spell,plan));
+  assert.deepEqual(revised.initial,plan.initial);
+  assert.deepEqual(revised.followups,[{...plan.followups[0],dc:32}]);
+});
 test('root reveal updates existing native followups using their public mechanics and stable embedded identity', async () => {
   const f = fixture(), c = f.child(), before = plain(c.flags.pf2e), audience = {whisper: [...c.whisper], blind: c.blind};
   await f.api.reveal(f.privateCard);
